@@ -1,5 +1,6 @@
 from django.db import models
 from accounts.models import User
+from django.db.models import Sum
 
 
 class Program(models.Model):
@@ -11,13 +12,21 @@ class Program(models.Model):
 
 
 class Student(models.Model):
+    LEVEL_CHOICES = [
+        ('100', 'Level 100'),
+        ('200', 'Level 200'),
+        ('300', 'Level 300'),
+        ('400', 'Level 400'),
+    ]
+    
     index_number = models.CharField(max_length=50, unique=True)
     full_name = models.CharField(max_length=255)
     program = models.ForeignKey(Program, on_delete=models.PROTECT)
+    level = models.CharField(max_length=3, choices=LEVEL_CHOICES, default='100')
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ["index_number"]
+        ordering = ["level", "index_number"]
 
     def __str__(self):
         return f"{self.index_number} - {self.full_name}"
@@ -42,7 +51,6 @@ class ProcedureStep(models.Model):
         related_name="steps"
     )
     description = models.TextField()
-    # max_score = models.PositiveIntegerField()
     step_order = models.PositiveIntegerField()
 
     class Meta:
@@ -81,12 +89,33 @@ class StudentProcedure(models.Model):
     )
 
     assessed_at = models.DateTimeField(auto_now_add=True)
+    
+    reconciled_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="reconciled_procedures",
+        null=True,
+        blank=True
+    )
+    reconciled_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ("student", "procedure")
 
     def __str__(self):
         return f"{self.student} - {self.procedure}"
+    
+    def get_total_reconciled_score(self):
+        """Get total reconciled score for this procedure"""
+        return self.reconciled_scores.aggregate(
+            total=Sum('score')
+        )['total'] or 0
+    
+    def get_reconciliation_percentage(self):
+        """Get reconciliation percentage"""
+        total = self.get_total_reconciled_score()
+        max_score = self.procedure.total_score
+        return (total / max_score * 100) if max_score > 0 else 0
 
 
 class ProcedureStepScore(models.Model):
@@ -103,11 +132,41 @@ class ProcedureStepScore(models.Model):
         User,
         on_delete=models.PROTECT
     )
-    score = models.PositiveSmallIntegerField()  # 0–4
+    score = models.PositiveSmallIntegerField()  # 0-4
+    
+    is_reconciled = models.BooleanField(default=False)
+    
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("student_procedure", "step", "examiner")
+        unique_together = ("student_procedure", "step", "examiner", "is_reconciled")
 
     def __str__(self):
         return f"{self.step} = {self.score}"
+
+
+class ReconciledScore(models.Model):
+    """Final reconciled scores - separate from examiner scores"""
+    student_procedure = models.ForeignKey(
+        StudentProcedure,
+        on_delete=models.CASCADE,
+        related_name="reconciled_scores"
+    )
+    step = models.ForeignKey(
+        ProcedureStep,
+        on_delete=models.CASCADE
+    )
+    score = models.PositiveSmallIntegerField()  # 0-4
+    reconciled_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="scores_reconciled"
+    )
+    reconciled_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ("student_procedure", "step")
+        ordering = ['step__step_order']
+    
+    def __str__(self):
+        return f"{self.student_procedure.student} - {self.step} = {self.score} (reconciled)"

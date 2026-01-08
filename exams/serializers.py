@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Program, Student, Procedure, ProcedureStep, ProcedureStepScore, StudentProcedure
+from .models import Program, Student, Procedure, ProcedureStep, ProcedureStepScore, StudentProcedure, ReconciledScore
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -53,7 +53,7 @@ class StudentCreateUpdateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Student
-        fields = ['id', 'index_number', 'full_name', 'program_id', 'is_active']
+        fields = ['id', 'index_number', 'full_name', 'program_id', 'level', 'is_active']
     
     def create(self, validated_data):
         program_id = validated_data.pop('program_id')
@@ -64,7 +64,6 @@ class StudentCreateUpdateSerializer(serializers.ModelSerializer):
         if 'program_id' in validated_data:
             instance.program_id = validated_data.pop('program_id')
         return super().update(instance, validated_data)
-
 
 class ProcedureCreateUpdateSerializer(serializers.ModelSerializer):
     program_id = serializers.IntegerField(write_only=True)
@@ -97,10 +96,11 @@ class ProgramSerializer(serializers.ModelSerializer):
 
 class StudentSerializer(serializers.ModelSerializer):
     program = ProgramSerializer(read_only=True)
+    level_display = serializers.CharField(source='get_level_display', read_only=True)
 
     class Meta:
         model = Student
-        fields = ["id", "index_number", "full_name", "program"]
+        fields = ["id", "index_number", "full_name", "program", "level", "level_display"]
 
 
 class ProcedureStepSerializer(serializers.ModelSerializer):
@@ -138,13 +138,16 @@ class ProcedureStepScoreSerializer(serializers.ModelSerializer):
 
 
 class ProcedureListSerializer(serializers.ModelSerializer):
-    status = serializers.SerializerMethodField()
+    program_name = serializers.CharField(source="program.name", read_only=True)
+    program_abbreviation = serializers.CharField(source="program.abbreviation", read_only=True)
+    program_id = serializers.IntegerField(source="program.id", read_only=True)
     step_count = serializers.SerializerMethodField()
-    program = serializers.CharField(source="program.abbreviation")
+    status = serializers.SerializerMethodField()
     
     class Meta:
         model = Procedure
-        fields = ["id", "program", "name", "total_score", "status", "step_count"]
+        fields = ["id", "name", "total_score", "program_id", "program_name", 
+                  "program_abbreviation", "status", "step_count"]
     
     def get_status(self, obj):
         student_id = self.context.get("student_id")
@@ -152,10 +155,31 @@ class ProcedureListSerializer(serializers.ModelSerializer):
             return "pending"
         
         sp = obj.studentprocedure_set.filter(student_id=student_id).first()
-        return sp.status if sp else "pending"
+        if not sp:
+            return "pending"
+        
+        # If both examiners are the same (not yet fully assigned), return pending
+        if sp.examiner_a == sp.examiner_b:
+            return "pending"
+        
+        return sp.status
     
-    def get_step_count(self, obj): return obj.steps.count()
+    def get_step_count(self, obj):
+        return obj.steps.count()
 
+
+# For admin list view, add this serializer
+class ProcedureAdminListSerializer(serializers.ModelSerializer):
+    program = serializers.CharField(source="program.name", read_only=True)
+    program_id = serializers.IntegerField(source="program.id", read_only=True)
+    step_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Procedure
+        fields = ["id", "name", "program", "program_id", "total_score", "step_count"]
+    
+    def get_step_count(self, obj):
+        return obj.steps.count()
 
 class ProcedureDetailSerializer(serializers.ModelSerializer):
     steps = serializers.SerializerMethodField()
@@ -163,10 +187,14 @@ class ProcedureDetailSerializer(serializers.ModelSerializer):
     scores = serializers.SerializerMethodField()
     is_examiner = serializers.SerializerMethodField()
     examiner_role = serializers.SerializerMethodField()
+    both_examiners_assigned = serializers.SerializerMethodField()  # NEW
 
     class Meta:
         model = Procedure
-        fields = ["id", "name", "total_score", "steps", "studentProcedureId", "scores", "is_examiner", "examiner_role"]
+        fields = [
+            "id", "name", "total_score", "steps", "studentProcedureId", 
+            "scores", "is_examiner", "examiner_role", "both_examiners_assigned"
+        ]
 
     def get_steps(self, obj):
         steps = obj.steps.all()
@@ -226,6 +254,24 @@ class ProcedureDetailSerializer(serializers.ModelSerializer):
         elif request.user == sp.examiner_b:
             return "B"
         return None
+    
+    def get_both_examiners_assigned(self, obj):
+        """Check if both different examiners are assigned"""
+        student_id = self.context.get("student_id")
+        if not student_id:
+            return False
+        
+        sp = obj.studentprocedure_set.filter(student_id=student_id).first()
+        if not sp:
+            return False
+        
+        return sp.examiner_a != sp.examiner_b
+
+
+class ReconciledScoreSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReconciledScore
+        fields = ['step', 'score', 'reconciled_by', 'reconciled_at']
 
 
 class ReconciliationSerializer(serializers.ModelSerializer):
@@ -233,24 +279,39 @@ class ReconciliationSerializer(serializers.ModelSerializer):
     student = StudentSerializer(read_only=True)
     examiner_a_name = serializers.CharField(source='examiner_a.get_full_name', read_only=True)
     examiner_b_name = serializers.CharField(source='examiner_b.get_full_name', read_only=True)
+    reconciled_by_name = serializers.SerializerMethodField()
+    is_already_reconciled = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentProcedure
         fields = [
             "id", "student", "procedure", "status",
-            "examiner_a_name", "examiner_b_name", "steps"
+            "examiner_a_name", "examiner_b_name", 
+            "reconciled_by_name", "reconciled_at",
+            "is_already_reconciled", "steps"
         ]
+    
+    def get_reconciled_by_name(self, obj):
+        return obj.reconciled_by.get_full_name() if obj.reconciled_by else None
+    
+    def get_is_already_reconciled(self, obj):
+        return obj.status == 'reconciled'
 
     def get_steps(self, obj):
         steps_data = []
         for step in obj.procedure.steps.all():
             # Get scores from both examiners
             examiner_a_score = obj.step_scores.filter(
-                step=step, examiner=obj.examiner_a
+                step=step, 
+                examiner=obj.examiner_a
             ).first()
             examiner_b_score = obj.step_scores.filter(
-                step=step, examiner=obj.examiner_b
+                step=step, 
+                examiner=obj.examiner_b
             ).first()
+            
+            # Get existing reconciled score if already reconciled
+            reconciled_score = obj.reconciled_scores.filter(step=step).first()
 
             steps_data.append({
                 "id": step.id,
@@ -258,6 +319,6 @@ class ReconciliationSerializer(serializers.ModelSerializer):
                 "step_order": step.step_order,
                 "examiner_a_score": examiner_a_score.score if examiner_a_score else None,
                 "examiner_b_score": examiner_b_score.score if examiner_b_score else None,
+                "reconciled_score": reconciled_score.score if reconciled_score else None,
             })
         return steps_data
-    

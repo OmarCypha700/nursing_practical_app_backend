@@ -1,77 +1,9 @@
-# from django.contrib import admin
-# from .models import Program, Student, Procedure, ProcedureStep, StudentProcedure
-
-# # ----------------------------
-# # Program
-# # ----------------------------
-# @admin.register(Program)
-# class ProgramAdmin(admin.ModelAdmin):
-#     list_display = ("id", "name", "abbreviation")
-#     search_fields = ("name", "abbreviation")
-
-# # ----------------------------
-# # Student
-# # ----------------------------
-# @admin.register(Student)
-# class StudentAdmin(admin.ModelAdmin):
-#     list_display = ("index_number", "full_name", "program", "is_active")
-#     list_filter = ("program", "is_active")
-#     search_fields = ("index_number", "full_name")
-
-# # ----------------------------
-# # ProcedureStep inline for Procedure
-# # ----------------------------
-# class ProcedureStepInline(admin.TabularInline):
-#     model = ProcedureStep
-#     extra = 1
-
-# # ----------------------------
-# # Procedure
-# # ----------------------------
-# @admin.register(Procedure)
-# class ProcedureAdmin(admin.ModelAdmin):
-#     list_display = ("name", "program", "total_score")
-#     list_filter = ("program",)
-#     inlines = [ProcedureStepInline]
-
-# # ----------------------------
-# # StudentProcedure
-# # ----------------------------
-# @admin.register(StudentProcedure)
-# class StudentProcedureAdmin(admin.ModelAdmin):
-#     list_display = ("student", "procedure", "examiner_a", "examiner_b", "status", "assessed_at")
-#     list_filter = ("procedure", "status")
-#     search_fields = ("student__full_name", "student__index_number")
-
-
 from django.contrib import admin
 from import_export import resources, fields, widgets
 from import_export.admin import ImportExportModelAdmin, ExportActionMixin
 from accounts.models import User
-from .models import Program, Student, Procedure, ProcedureStep, StudentProcedure, ProcedureStepScore
+from .models import Program, Student, Procedure, ProcedureStep, StudentProcedure, ProcedureStepScore, ReconciledScore
 from import_export.admin import ImportExportModelAdmin
-
-# # Monkey patch to fix Django 5.x compatibility
-# from import_export import admin as import_export_admin
-
-# original_create_log_entry = import_export_admin.ImportMixin._create_log_entry
-
-# def patched_create_log_entry(self, request, obj, object_id, object_repr, change_message=""):
-#     from django.contrib.admin.models import LogEntry
-#     from django.contrib.contenttypes.models import ContentType
-    
-#     # Remove the 'single_object' parameter that Django 5.x doesn't accept
-#     return LogEntry.objects.log_action(
-#         user_id=request.user.pk,
-#         content_type_id=ContentType.objects.get_for_model(obj).pk,
-#         object_id=object_id,
-#         object_repr=object_repr,
-#         # action_flag=action_flag,
-#         change_message=change_message,
-#     )
-
-# import_export_admin.ImportMixin._create_log_entry = patched_create_log_entry
-
 
 # ============== RESOURCES ==============
 
@@ -88,11 +20,15 @@ class StudentResource(resources.ModelResource):
         attribute='program',
         widget=widgets.ForeignKeyWidget(Program, 'name')
     )
+    level_display = fields.Field(
+        column_name='level_display',
+        attribute='get_level_display'
+    )
     
     class Meta:
         model = Student
-        fields = ('id', 'index_number', 'full_name', 'program_name', 'is_active')
-        export_order = ('id', 'index_number', 'full_name', 'program_name', 'is_active')
+        fields = ('id', 'index_number', 'full_name', 'program_name', 'level', 'level_display', 'is_active')
+        export_order = ('id', 'index_number', 'full_name', 'program_name', 'level', 'level_display', 'is_active')
         import_id_fields = ['index_number']
 
 
@@ -107,7 +43,7 @@ class ProcedureResource(resources.ModelResource):
         model = Procedure
         fields = ('id', 'program_name', 'name', 'total_score')
         export_order = ('id', 'program_name', 'name', 'total_score')
-        import_id_fields = ['program', 'name']
+        import_id_fields = ['program_name', 'name']
 
 
 class ProcedureStepResource(resources.ModelResource):
@@ -179,19 +115,10 @@ class ProgramAdmin(ImportExportModelAdmin):
 @admin.register(Student)
 class StudentAdmin(ImportExportModelAdmin):
     resource_class = StudentResource
-    list_display = ('index_number', 'full_name', 'program', 'is_active')
-    list_filter = ('program', 'is_active')
+    list_display = ('index_number', 'full_name', 'program', 'level', 'is_active')
+    list_filter = ('program', 'level', 'is_active')
     search_fields = ('index_number', 'full_name')
-
-    # Disable logging to avoid Django 5.x incompatibility
-    def log_addition(self, request, object, message):
-        pass
-    
-    def log_change(self, request, object, message):
-        pass
-    
-    def log_deletion(self, request, object, object_repr):
-        pass
+    ordering = ('level', 'index_number')
 
 
 class ProcedureStepInline(admin.TabularInline):
@@ -260,26 +187,41 @@ class StudentProcedureAdmin(ImportExportModelAdmin, ExportActionMixin):
     )
     date_hierarchy = 'assessed_at'
 
-    # Disable logging to avoid Django 5.x incompatibility
-    def log_addition(self, request, object, message):
-        pass
+    # # Disable logging to avoid Django 5.x incompatibility
+    # def log_addition(self, request, object, message):
+    #     pass
     
-    def log_change(self, request, object, message):
-        pass
+    # def log_change(self, request, object, message):
+    #     pass
     
-    def log_deletion(self, request, object, object_repr):
-        pass
+    # def log_deletion(self, request, object, object_repr):
+    #     pass
 
 
 @admin.register(ProcedureStepScore)
 class ProcedureStepScoreAdmin(admin.ModelAdmin):
     list_display = (
-        'student_procedure', 'step', 'examiner', 'score', 'updated_at'
+        'student_procedure', 'step', 'examiner', 'score', 'updated_at', 'is_reconciled'
     )
-    list_filter = ('score', 'examiner', 'updated_at')
+    list_filter = ('score', 'examiner', 'updated_at', 'is_reconciled')
     search_fields = (
         'student_procedure__student__index_number',
         'student_procedure__student__full_name',
         'step__description'
     )
     date_hierarchy = 'updated_at'
+
+
+@admin.register(ReconciledScore)
+class ReconciledScoreAdmin(admin.ModelAdmin):
+    list_display = (
+        'student_procedure', 'step', 'score', 
+        'reconciled_by', 'reconciled_at'
+    )
+    list_filter = ('reconciled_by', 'reconciled_at')
+    search_fields = (
+        'student_procedure__student__index_number',
+        'student_procedure__student__full_name',
+        'step__description'
+    )
+    date_hierarchy = 'reconciled_at'
