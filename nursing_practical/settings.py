@@ -10,7 +10,8 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 import os
-import getenv
+from dotenv import load_dotenv
+load_dotenv()
 
 from pathlib import Path
 
@@ -22,12 +23,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-n=_7b9yl+4=^y5=k^s9#!6$tvm2v=aow4d&$3@g-n(fyog^ws%'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['nursingpracticals.pythonanywhere.com', 'localhost', '127.0.0.1']
+# Allowed hosts
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+FRONTEND_DEV_URL = os.getenv("FRONTEND_DEV_URL")
+BACKEND_URL = os.getenv("BACKEND_URL")
+BACKEND_DEV_URL = os.getenv("BACKEND_DEV_URL")
+LOCALHOST = os.getenv("LOCALHOST")
+
+ALLOWED_HOSTS = [BACKEND_DEV_URL,BACKEND_URL,LOCALHOST]
 
 
 # Application definition
@@ -168,9 +176,7 @@ REST_FRAMEWORK = {
 # ------------------------------
 # CORS SETTINGS (if frontend separate)
 # ------------------------------
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:3001",]
+CORS_ALLOWED_ORIGINS = [FRONTEND_DEV_URL,FRONTEND_URL]
 
 CORS_ALLOW_CREDENTIALS = True
 
