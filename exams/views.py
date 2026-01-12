@@ -42,7 +42,7 @@ class StudentByProgramView(ListAPIView):
 
     def get_queryset(self):
         program_id = self.kwargs["program_id"]
-        queryset = Student.objects.filter(program_id=program_id)
+        queryset = Student.objects.filter(program_id=program_id, is_active=True)
         
         # Optional level filter
         level = self.request.query_params.get('level')

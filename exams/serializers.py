@@ -91,7 +91,7 @@ class StudentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Student
-        fields = ["id", "index_number", "full_name", "program", "level", "level_display"]
+        fields = ["id", "index_number", "full_name", "program", "level", "level_display", "is_active"]
 
 
 class ProcedureStepSerializer(serializers.ModelSerializer):
