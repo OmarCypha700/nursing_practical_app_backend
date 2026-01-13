@@ -170,3 +170,26 @@ class ReconciledScore(models.Model):
     
     def __str__(self):
         return f"{self.student_procedure.student} - {self.step} = {self.score} (reconciled)"
+    
+
+class CarePlan(models.Model):
+    """Care Plan assessment - single examiner scoring"""
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='care_plans')
+    program = models.ForeignKey(Program, on_delete=models.CASCADE)
+    examiner = models.ForeignKey(User, on_delete=models.PROTECT, related_name='care_plan_assessments')
+    score = models.PositiveSmallIntegerField()  # 0-20
+    max_score = models.PositiveIntegerField(default=20)
+    comments = models.TextField(blank=True, null=True)
+    assessed_at = models.DateTimeField(auto_now_add=True)
+    is_locked = models.BooleanField(default=True)  # Locked after submission
+    
+    class Meta:
+        unique_together = ('student', 'program')
+        ordering = ['-assessed_at']
+    
+    def __str__(self):
+        return f"{self.student} - Care Plan ({self.score}/{self.max_score})"
+    
+    def get_percentage(self):
+        return (self.score / self.max_score * 100) if self.max_score > 0 else 0
+

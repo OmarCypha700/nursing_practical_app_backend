@@ -1,8 +1,8 @@
 from django.contrib import admin
 from import_export import resources, fields, widgets
 from import_export.admin import ImportExportModelAdmin, ExportActionMixin
-from accounts.models import User
-from .models import Program, Student, Procedure, ProcedureStep, StudentProcedure, ProcedureStepScore, ReconciledScore
+# from accounts.models import User
+from .models import Program, Student, Procedure, ProcedureStep, StudentProcedure, ProcedureStepScore, ReconciledScore, CarePlan
 from import_export.admin import ImportExportModelAdmin
 
 # ============== RESOURCES ==============
@@ -225,3 +225,13 @@ class ReconciledScoreAdmin(admin.ModelAdmin):
         'step__description'
     )
     date_hierarchy = 'reconciled_at'
+
+
+# Care Plan Admin
+@admin.register(CarePlan)
+class CarePlanAdmin(admin.ModelAdmin):
+    list_display = ('student', 'program', 'examiner', 'score', 'max_score', 'assessed_at', 'is_locked')
+    list_filter = ('program', 'is_locked', 'assessed_at')
+    search_fields = ('student__index_number', 'student__full_name', 'examiner__username')
+    date_hierarchy = 'assessed_at'
+    readonly_fields = ('assessed_at',)

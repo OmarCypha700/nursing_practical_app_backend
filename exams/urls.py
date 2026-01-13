@@ -16,13 +16,12 @@ from .views import (
     ProcedureStepViewSet,
     StudentGradesView,
     ProgramViewSet,
-    # ExportGradesView,
-    # ExportStudentsView,
     ImportStudentsView,
     DownloadStudentTemplateView,
     ImportProceduresView,
     DownloadProcedureTemplateView,
     BulkDeleteStudentsView,
+    CarePlanView,
 )
 
 # Router for viewsets
@@ -46,6 +45,10 @@ urlpatterns = [
     path("students/import/", ImportStudentsView.as_view(), name='import-students'),
     path("students/template/", DownloadStudentTemplateView.as_view(), name='student-template'),
     path("students/bulk-delete/", BulkDeleteStudentsView.as_view(), name='bulk-delete-students'),
+
+    # Care Plan
+    path("students/<int:student_id>/programs/<int:program_id>/care-plan/", 
+         CarePlanView.as_view(), name='care-plan'),
     
     # Reconciliation
     path("students/<int:student_id>/procedures/<int:procedure_id>/reconciliation/", 

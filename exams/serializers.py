@@ -1,5 +1,7 @@
 from rest_framework import serializers
-from .models import Program, Student, Procedure, ProcedureStep, ProcedureStepScore, StudentProcedure, ReconciledScore
+from .models import (Program, Student, Procedure, 
+                     ProcedureStep, ProcedureStepScore, StudentProcedure, 
+                     ReconciledScore, CarePlan)
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -13,7 +15,6 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'is_active', 'date_joined']
         read_only_fields = ['date_joined']
     
-
 
 class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
@@ -159,7 +160,6 @@ class ProcedureListSerializer(serializers.ModelSerializer):
         return obj.steps.count()
 
 
-# For admin list view, add this serializer
 class ProcedureAdminListSerializer(serializers.ModelSerializer):
     program = serializers.CharField(source="program.name", read_only=True)
     program_id = serializers.IntegerField(source="program.id", read_only=True)
@@ -313,3 +313,40 @@ class ReconciliationSerializer(serializers.ModelSerializer):
                 "reconciled_score": reconciled_score.score if reconciled_score else None,
             })
         return steps_data
+    
+
+# ================ CARE PLAN SERIALIZERS ==============
+class CarePlanSerializer(serializers.ModelSerializer):
+    student = StudentSerializer(read_only=True)
+    examiner_name = serializers.CharField(source='examiner.get_full_name', read_only=True)
+    percentage = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = CarePlan
+        fields = ['id', 'student', 'program', 'examiner', 'examiner_name', 
+                  'score', 'max_score', 'percentage', 'comments', 
+                  'assessed_at', 'is_locked']
+        read_only_fields = ['examiner', 'assessed_at', 'is_locked']
+    
+    def get_percentage(self, obj):
+        return obj.get_percentage()
+
+
+class CarePlanCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CarePlan
+        fields = ['student', 'program', 'score', 'comments']
+    
+    def validate_score(self, value):
+        if value < 0 or value > 20:
+            raise serializers.ValidationError("Score must be between 0 and 20")
+        return value
+    
+    def validate(self, data):
+        # Check if care plan already exists
+        if CarePlan.objects.filter(
+            student=data['student'], 
+            program=data['program']
+        ).exists():
+            raise serializers.ValidationError("Care plan already exists for this student")
+        return data
