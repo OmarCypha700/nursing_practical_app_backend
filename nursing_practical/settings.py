@@ -36,7 +36,7 @@ BACKEND_URL = os.getenv("BACKEND_URL")
 BACKEND_DEV_URL = os.getenv("BACKEND_DEV_URL")
 LOCALHOST = os.getenv("LOCALHOST")
 
-ALLOWED_HOSTS = [BACKEND_DEV_URL,BACKEND_URL,LOCALHOST]
+ALLOWED_HOSTS = [BACKEND_DEV_URL,BACKEND_URL,LOCALHOST, ]
 
 
 # Application definition
@@ -53,7 +53,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "import_export",
     "accounts",  
-    "exams",     
+    "exams",
 ]
 
 MIDDLEWARE = [
@@ -196,7 +196,7 @@ SIMPLE_JWT = {
 # ------------------------------
 # CORS SETTINGS (if frontend separate)
 # ------------------------------
-CORS_ALLOWED_ORIGINS = [FRONTEND_DEV_URL,FRONTEND_URL]
+CORS_ALLOWED_ORIGINS = [FRONTEND_DEV_URL,FRONTEND_URL, ]
 
 CORS_ALLOW_CREDENTIALS = True
 
