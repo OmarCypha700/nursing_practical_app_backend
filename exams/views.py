@@ -584,6 +584,8 @@ class StudentViewSet(viewsets.ModelViewSet):
         student.save()
         return Response({'is_active': student.is_active})
 
+
+# =====================PROCEDURE IMPORT VIEWS============================
 class ProcedureViewSet(viewsets.ModelViewSet):
     """CRUD operations for procedures with export functionality"""
     queryset = Procedure.objects.select_related('program').prefetch_related('steps').all()
@@ -1176,6 +1178,211 @@ class ProcedureStepViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(procedure_id=procedure_id)
         return queryset
 
+# ==================PROCEDURE STEPS IMPORT VIEWS==================
+
+class ImportProcedureStepsView(APIView):
+    """Import steps for a specific procedure from Excel or CSV file"""
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    
+    def post(self, request, procedure_id):
+        if 'file' not in request.FILES:
+            return Response({'error': 'No file provided'}, status=400)
+        
+        file = request.FILES['file']
+        file_extension = file.name.split('.')[-1].lower()
+        
+        if file_extension not in ['csv', 'xlsx', 'xls']:
+            return Response({'error': 'Invalid file format. Use CSV or Excel.'}, status=400)
+        
+        # Verify procedure exists
+        try:
+            procedure = Procedure.objects.get(id=procedure_id)
+        except Procedure.DoesNotExist:
+            return Response({'error': 'Procedure not found'}, status=404)
+        
+        try:
+            if file_extension == 'csv':
+                return self._import_csv(file, procedure)
+            else:
+                return self._import_excel(file, procedure)
+        except Exception as e:
+            return Response({'error': str(e)}, status=400)
+    
+    def _import_csv(self, file, procedure):
+        import csv
+        from django.db import transaction
+        
+        try:
+            decoded_file = file.read().decode('utf-8').splitlines()
+        except UnicodeDecodeError:
+            return Response({'error': 'File encoding error. Please save as UTF-8.'}, status=400)
+        
+        reader = csv.DictReader(decoded_file)
+        return self._process_import(reader, procedure)
+    
+    def _import_excel(self, file, procedure):
+        from openpyxl import load_workbook
+        
+        try:
+            wb = load_workbook(file, data_only=True)
+            ws = wb.active
+        except Exception as e:
+            return Response({'error': f'Failed to read Excel file: {str(e)}'}, status=400)
+        
+        # Get headers from first row
+        headers = [cell.value for cell in ws[1]]
+        
+        # Create list of dictionaries
+        data = []
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not any(row):  # Skip empty rows
+                continue
+            row_dict = dict(zip(headers, row))
+            data.append(row_dict)
+        
+        return self._process_import(data, procedure)
+    
+    @transaction.atomic
+    def _process_import(self, data, procedure):
+        created_count = 0
+        updated_count = 0
+        error_count = 0
+        errors = []
+        
+        for row_num, row in enumerate(data, start=2):
+            try:
+                # Get fields
+                step_order_str = str(row.get('Step Order', '')).strip()
+                description = str(row.get('Description', '')).strip()
+                
+                # Validate required fields
+                if not step_order_str or not description:
+                    errors.append(f"Row {row_num}: Missing step order or description")
+                    error_count += 1
+                    continue
+                
+                # Parse step order
+                try:
+                    step_order = int(step_order_str)
+                except ValueError:
+                    errors.append(f"Row {row_num}: Invalid step order '{step_order_str}'")
+                    error_count += 1
+                    continue
+                
+                # Create or update step
+                step, created = ProcedureStep.objects.update_or_create(
+                    procedure=procedure,
+                    step_order=step_order,
+                    defaults={
+                        'description': description,
+                    }
+                )
+                
+                if created:
+                    created_count += 1
+                else:
+                    updated_count += 1
+                    
+            except Exception as e:
+                errors.append(f"Row {row_num}: {str(e)}")
+                error_count += 1
+        
+        return Response({
+            'success': True,
+            'created': created_count,
+            'updated': updated_count,
+            'errors': error_count,
+            'error_details': errors[:20],  # Limit to first 20 errors
+        })
+
+
+class DownloadProcedureStepsTemplateView(APIView):
+    """Download template for procedure steps import"""
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    
+    def get(self, request, procedure_id):
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill
+        
+        # Verify procedure exists
+        try:
+            procedure = Procedure.objects.get(id=procedure_id)
+        except Procedure.DoesNotExist:
+            return Response({'error': 'Procedure not found'}, status=404)
+        
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Procedure Steps"
+        
+        # Headers
+        headers = ['Step Order', 'Description']
+        ws.append(headers)
+        
+        # Style headers
+        for cell in ws[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+        
+        # Add existing steps as reference
+        existing_steps = procedure.steps.all().order_by('step_order')
+        for step in existing_steps:
+            ws.append([step.step_order, step.description])
+        
+        # If no steps exist, add sample data
+        if not existing_steps.exists():
+            ws.append([1, 'Introduce yourself and explain the procedure'])
+            ws.append([2, 'Wash hands and put on gloves'])
+            ws.append([3, 'Gather necessary equipment'])
+        
+        # Add instructions sheet
+        ws_instructions = wb.create_sheet("Instructions")
+        instructions = [
+            ['Import Instructions for Procedure Steps'],
+            [''],
+            [f'Procedure: {procedure.name}'],
+            [f'Program: {procedure.program.name}'],
+            [''],
+            ['1. Fill in the required columns:'],
+            ['   - Step Order: Sequential number (1, 2, 3, etc.) (required)'],
+            ['   - Description: Step instructions (required)'],
+            [''],
+            ['2. Notes:'],
+            ['   - Steps with existing order numbers will be updated'],
+            ['   - New step orders will create new steps'],
+            ['   - You can reorder steps by changing the step order numbers'],
+            ['   - Leave no gaps in step order numbers'],
+            [''],
+            ['3. Save as Excel (.xlsx) or CSV (.csv) file'],
+            ['4. Upload through the import button'],
+        ]
+        
+        for row in instructions:
+            ws_instructions.append(row)
+        
+        # Adjust column widths
+        for ws_sheet in [ws, ws_instructions]:
+            for column in ws_sheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(cell.value)
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 80)
+                ws_sheet.column_dimensions[column_letter].width = adjusted_width
+        
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="{procedure.name}_steps_template.xlsx"'
+        wb.save(response)
+        
+        return response
+
+
+
 class ProgramViewSet(viewsets.ModelViewSet):
     """CRUD operations for programs"""
     queryset = Program.objects.all()
@@ -1227,6 +1434,7 @@ class CarePlanView(APIView):
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# =======================STUDENT VIEWS==============================
 class StudentGradesView(APIView):
     """Get or export grades for all students"""
     permission_classes = [IsAuthenticated]

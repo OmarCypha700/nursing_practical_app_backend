@@ -46,17 +46,56 @@ class ProcedureResource(resources.ModelResource):
         import_id_fields = ['program_name', 'name']
 
 
+# class ProcedureStepResource(resources.ModelResource):
+#     procedure_name = fields.Field(
+#         column_name='procedure_name',
+#         attribute='procedure',
+#         widget=widgets.ForeignKeyWidget(Procedure, 'name')
+#     )
+    
+#     class Meta:
+#         model = ProcedureStep
+#         fields = ('id', 'procedure_name', 'description', 'step_order')
+#         export_order = ('id', 'procedure_name', 'description', 'step_order')
+
 class ProcedureStepResource(resources.ModelResource):
-    procedure_name = fields.Field(
-        column_name='procedure_name',
-        attribute='procedure',
-        widget=widgets.ForeignKeyWidget(Procedure, 'name')
-    )
+    procedure_name = fields.Field(column_name='procedure_name')
+    program_name = fields.Field(column_name='program_name')
     
     class Meta:
         model = ProcedureStep
-        fields = ('id', 'procedure_name', 'description', 'step_order')
-        export_order = ('id', 'procedure_name', 'description', 'step_order')
+        fields = ('id', 'procedure_name', 'program_name', 'description', 'step_order')
+        export_order = ('id', 'procedure_name', 'program_name', 'description', 'step_order')
+    
+    def before_import_row(self, row, **kwargs):
+        """Resolve procedure using both name and program"""
+        procedure_name = row.get('procedure_name')
+        program_name = row.get('program_name')
+        
+        if not procedure_name or not program_name:
+            raise ValueError("Both procedure_name and program_name are required")
+        
+        try:
+            program = Program.objects.get(name=program_name)
+            procedure = Procedure.objects.get(name=procedure_name, program=program)
+            # Don't set procedure directly - we'll handle it in skip_row or import_obj
+            self._procedure_cache = procedure
+        except Program.DoesNotExist:
+            raise ValueError(f"Program '{program_name}' not found")
+        except Procedure.DoesNotExist:
+            raise ValueError(f"Procedure '{procedure_name}' not found in program '{program_name}'")
+    
+    def import_obj(self, obj, data, dry_run, **kwargs):
+        """Set the procedure from our cache"""
+        if hasattr(self, '_procedure_cache'):
+            obj.procedure = self._procedure_cache
+        return super().import_obj(obj, data, dry_run, **kwargs)
+    
+    def dehydrate_procedure_name(self, step):
+        return step.procedure.name
+    
+    def dehydrate_program_name(self, step):
+        return step.procedure.program.name
 
 
 class StudentProcedureResource(resources.ModelResource):
@@ -186,16 +225,6 @@ class StudentProcedureAdmin(ImportExportModelAdmin, ExportActionMixin):
         'procedure__name'
     )
     date_hierarchy = 'assessed_at'
-
-    # # Disable logging to avoid Django 5.x incompatibility
-    # def log_addition(self, request, object, message):
-    #     pass
-    
-    # def log_change(self, request, object, message):
-    #     pass
-    
-    # def log_deletion(self, request, object, object_repr):
-    #     pass
 
 
 @admin.register(ProcedureStepScore)

@@ -20,6 +20,8 @@ from .views import (
     DownloadStudentTemplateView,
     ImportProceduresView,
     DownloadProcedureTemplateView,
+    ImportProcedureStepsView,
+    DownloadProcedureStepsTemplateView,
     BulkDeleteStudentsView,
     CarePlanView,
 )
@@ -65,6 +67,12 @@ urlpatterns = [
     path("procedures/import/", ImportProceduresView.as_view(), name='import-procedures'),
     path("procedures/template/", DownloadProcedureTemplateView.as_view(), name='procedure-template'),
     
+    # Procedure Steps Import/Export
+    path("procedures/<int:procedure_id>/steps/import/", 
+         ImportProcedureStepsView.as_view(), name='import-procedure-steps'),
+    path("procedures/<int:procedure_id>/steps/template/", 
+         DownloadProcedureStepsTemplateView.as_view(), name='procedure-steps-template'),
+
     # Router URLs LAST
     path('', include(router.urls)),
 ]
