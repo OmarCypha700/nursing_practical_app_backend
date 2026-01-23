@@ -61,6 +61,98 @@ class ProcedureStep(models.Model):
         return f"{self.procedure.name} - Step {self.step_order}"
 
 
+# class StudentProcedure(models.Model):
+#     STATUS_CHOICES = (
+#         ("pending", "Pending"),
+#         ("scored", "Scored"),
+#         ("reconciled", "Reconciled"),
+#     )
+
+#     student = models.ForeignKey(Student, on_delete=models.CASCADE)
+#     procedure = models.ForeignKey(Procedure, on_delete=models.CASCADE)
+
+#     examiner_a = models.ForeignKey(
+#         User,
+#         on_delete=models.PROTECT,
+#         related_name="examiner_a_assignments"
+#     )
+#     examiner_b = models.ForeignKey(
+#         User,
+#         on_delete=models.PROTECT,
+#         related_name="examiner_b_assignments"
+#     )
+
+#     status = models.CharField(
+#         max_length=20,
+#         choices=STATUS_CHOICES,
+#         default="pending"
+#     )
+
+#     assessed_at = models.DateTimeField(auto_now_add=True)
+    
+#     reconciled_by = models.ForeignKey(
+#         User,
+#         on_delete=models.PROTECT,
+#         related_name="reconciled_procedures",
+#         null=True,
+#         blank=True
+#     )
+#     reconciled_at = models.DateTimeField(null=True, blank=True)
+
+#     class Meta:
+#         unique_together = ("student", "procedure")
+
+#     def __str__(self):
+#         return f"{self.student} - {self.procedure}"
+    
+#     def get_total_reconciled_score(self):
+#         """Get total reconciled score for this procedure"""
+#         return self.reconciled_scores.aggregate(
+#             total=Sum('score')
+#         )['total'] or 0
+    
+#     def get_reconciliation_percentage(self):
+#         """Get reconciliation percentage"""
+#         total = self.get_total_reconciled_score()
+#         max_score = self.procedure.total_score
+#         return (total / max_score * 100) if max_score > 0 else 0
+    
+#     def get_last_scoring_examiner(self):
+#         """
+#         Returns the examiner who completed scoring last, or None if scoring incomplete.
+#         Only returns an examiner if BOTH examiners have completed all steps.
+#         """
+#         if self.examiner_a == self.examiner_b:
+#             return None
+            
+#         total_steps = self.procedure.steps.count()
+        
+#         # Check if both examiners completed all steps
+#         examiner_a_scores = self.step_scores.filter(examiner=self.examiner_a).count()
+#         examiner_b_scores = self.step_scores.filter(examiner=self.examiner_b).count()
+        
+#         if examiner_a_scores != total_steps or examiner_b_scores != total_steps:
+#             return None
+        
+#         # Get the most recent score update for each examiner
+#         examiner_a_last_update = self.step_scores.filter(
+#             examiner=self.examiner_a
+#         ).order_by('-updated_at').first()
+        
+#         examiner_b_last_update = self.step_scores.filter(
+#             examiner=self.examiner_b
+#         ).order_by('-updated_at').first()
+        
+#         if not examiner_a_last_update or not examiner_b_last_update:
+#             return None
+        
+#         # Return the examiner who updated last
+#         if examiner_a_last_update.updated_at > examiner_b_last_update.updated_at:
+#             return self.examiner_a
+#         else:
+#             return self.examiner_b
+
+
 class StudentProcedure(models.Model):
     STATUS_CHOICES = (
         ("pending", "Pending"),
@@ -98,6 +190,15 @@ class StudentProcedure(models.Model):
         blank=True
     )
     reconciled_at = models.DateTimeField(null=True, blank=True)
+    
+    assigned_reconciler = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="assigned_reconciliations",
+        null=True,
+        blank=True,
+        help_text="The examiner assigned to perform reconciliation (locked once set)"
+    )
 
     class Meta:
         unique_together = ("student", "procedure")
@@ -116,7 +217,61 @@ class StudentProcedure(models.Model):
         total = self.get_total_reconciled_score()
         max_score = self.procedure.total_score
         return (total / max_score * 100) if max_score > 0 else 0
-
+    
+    def get_last_scoring_examiner(self):
+        """
+        Returns the examiner who completed scoring last, or None if scoring incomplete.
+        Only returns an examiner if BOTH examiners have completed all steps.
+        """
+        if self.examiner_a == self.examiner_b:
+            return None
+            
+        total_steps = self.procedure.steps.count()
+        
+        # Check if both examiners completed all steps
+        examiner_a_scores = self.step_scores.filter(examiner=self.examiner_a).count()
+        examiner_b_scores = self.step_scores.filter(examiner=self.examiner_b).count()
+        
+        if examiner_a_scores != total_steps or examiner_b_scores != total_steps:
+            return None
+        
+        # Get the most recent score update for each examiner
+        examiner_a_last_update = self.step_scores.filter(
+            examiner=self.examiner_a
+        ).order_by('-updated_at').first()
+        
+        examiner_b_last_update = self.step_scores.filter(
+            examiner=self.examiner_b
+        ).order_by('-updated_at').first()
+        
+        if not examiner_a_last_update or not examiner_b_last_update:
+            return None
+        
+        # Return the examiner who updated last
+        if examiner_a_last_update.updated_at > examiner_b_last_update.updated_at:
+            return self.examiner_a
+        else:
+            return self.examiner_b
+    
+    def can_user_reconcile(self, user):
+        """
+        Check if a user can reconcile this procedure.
+        Once assigned_reconciler is set, only that user can reconcile.
+        """
+        if self.status != 'scored':
+            return False
+        
+        # If reconciler already assigned, only that user can reconcile
+        if self.assigned_reconciler:
+            return self.assigned_reconciler == user
+        
+        # If not assigned yet, check if user is the last examiner to complete
+        last_examiner = self.get_last_scoring_examiner()
+        return last_examiner == user
+    
+    def is_user_assigned_examiner(self, user):
+        """Check if user is one of the assigned examiners"""
+        return user in [self.examiner_a, self.examiner_b]
 
 class ProcedureStepScore(models.Model):
     student_procedure = models.ForeignKey(

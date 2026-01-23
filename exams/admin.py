@@ -212,12 +212,26 @@ class ProcedureStepAdmin(ImportExportModelAdmin):
         pass
 
 
+# @admin.register(StudentProcedure)
+# class StudentProcedureAdmin(ImportExportModelAdmin, ExportActionMixin):
+#     resource_class = StudentProcedureResource
+#     list_display = (
+#         'student', 'procedure', 'examiner_a', 'examiner_b', 
+#         'status', 'assessed_at'
+#     )
+#     list_filter = ('status', 'procedure', 'assessed_at')
+#     search_fields = (
+#         'student__index_number', 'student__full_name',
+#         'procedure__name'
+#     )
+#     date_hierarchy = 'assessed_at'
+
 @admin.register(StudentProcedure)
 class StudentProcedureAdmin(ImportExportModelAdmin, ExportActionMixin):
     resource_class = StudentProcedureResource
     list_display = (
         'student', 'procedure', 'examiner_a', 'examiner_b', 
-        'status', 'assessed_at'
+        'status', 'assigned_reconciler', 'reconciled_by', 'assessed_at'
     )
     list_filter = ('status', 'procedure', 'assessed_at')
     search_fields = (
@@ -225,7 +239,7 @@ class StudentProcedureAdmin(ImportExportModelAdmin, ExportActionMixin):
         'procedure__name'
     )
     date_hierarchy = 'assessed_at'
-
+    readonly_fields = ('assigned_reconciler',)
 
 @admin.register(ProcedureStepScore)
 class ProcedureStepScoreAdmin(admin.ModelAdmin):

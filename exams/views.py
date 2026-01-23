@@ -65,6 +65,155 @@ class ProcedureByProgramView(ListAPIView):
         context["student_id"] = self.request.query_params.get("student_id")
         return context
 
+# class ProcedureDetailView(RetrieveAPIView):
+#     queryset = Procedure.objects.all()
+#     serializer_class = ProcedureDetailSerializer
+
+#     def retrieve(self, request, *args, **kwargs):
+#         student_id = self.kwargs.get("student_id")
+#         procedure = self.get_object()
+        
+#         # Get or create StudentProcedure
+#         sp, created = StudentProcedure.objects.get_or_create(
+#             student_id=student_id,
+#             procedure=procedure,
+#             defaults={
+#                 "examiner_a": request.user,
+#                 "examiner_b": request.user,  # Temporary placeholder
+#             }
+#         )
+        
+#         # Auto-assign second examiner
+#         if sp.examiner_a == sp.examiner_b:
+#             if sp.examiner_a == request.user:
+#                 # Current user is examiner_a, examiner_b not yet assigned
+#                 pass
+#             else:
+#                 # A different user is accessing, make them examiner_b
+#                 sp.examiner_b = request.user
+#                 sp.save()
+#         elif request.user not in [sp.examiner_a, sp.examiner_b]:
+#             # User is not an assigned examiner
+#             return Response(
+#                 {
+#                     "detail": "You are not assigned as an examiner for this procedure.",
+#                     "examiner_a": sp.examiner_a.get_full_name(),
+#                     "examiner_b": sp.examiner_b.get_full_name(),
+#                 },
+#                 status=status.HTTP_403_FORBIDDEN
+#             )
+        
+#         return super().retrieve(request, *args, **kwargs)
+    
+#     def get_serializer_context(self):
+#         context = super().get_serializer_context()
+#         context["student_id"] = self.kwargs.get("student_id")
+#         return context
+
+# class AutosaveStepScoreView(APIView):
+#     """
+#     Autosave the score for a single step.
+#     Expects POST data: { student_procedure: int, step: int, score: int }
+#     """
+
+#     def post(self, request, *args, **kwargs):
+#         data = request.data
+#         student_procedure_id = data.get("student_procedure")
+#         step_id = data.get("step")
+#         score = data.get("score")
+
+#         # Validate
+#         if not all([student_procedure_id, step_id, score is not None]):
+#             return Response(
+#                 {"detail": "student_procedure, step, and score are required."},
+#                 status=status.HTTP_400_BAD_REQUEST,
+#             )
+
+#         try:
+#             sp = StudentProcedure.objects.get(id=student_procedure_id)
+#             step = ProcedureStep.objects.get(id=step_id)
+#         except StudentProcedure.DoesNotExist:
+#             return Response({"detail": "StudentProcedure not found."}, status=404)
+#         except ProcedureStep.DoesNotExist:
+#             return Response({"detail": "ProcedureStep not found."}, status=404)
+
+#         # Verify current user is one of the assigned examiners
+#         if request.user not in [sp.examiner_a, sp.examiner_b]:
+#             return Response(
+#                 {"detail": "You are not authorized to score this procedure."},
+#                 status=status.HTTP_403_FORBIDDEN
+#             )
+
+#         # Save the step score
+#         step_score, created = ProcedureStepScore.objects.update_or_create(
+#             student_procedure=sp,
+#             step=step,
+#             examiner=request.user,
+#             defaults={"score": score},
+#         )
+
+#         # ✅ FIXED: Update status logic - Check if BOTH DIFFERENT examiners have scored ALL steps
+#         total_steps = sp.procedure.steps.count()
+        
+#         # Only update status if both examiners are different users
+#         if sp.examiner_a != sp.examiner_b:
+#             examiner_a_scores = sp.step_scores.filter(examiner=sp.examiner_a).count()
+#             examiner_b_scores = sp.step_scores.filter(examiner=sp.examiner_b).count()
+            
+#             examiner_a_complete = examiner_a_scores == total_steps
+#             examiner_b_complete = examiner_b_scores == total_steps
+
+#             # If both examiners have scored all steps, mark as "scored"
+#             if examiner_a_complete and examiner_b_complete:
+#                 if sp.status == "pending":
+#                     sp.status = "scored"
+#                     sp.save()
+#         else:
+#             # Only one examiner assigned, can't determine completion status
+#             examiner_a_complete = False
+#             examiner_b_complete = False
+
+#         return Response(
+#             {
+#                 "step": step.id, 
+#                 "score": step_score.score, 
+#                 "created": created,
+#                 "status": sp.status,
+#                 "examiner_a_complete": examiner_a_complete,
+#                 "examiner_b_complete": examiner_b_complete,
+#                 "both_examiners_assigned": sp.examiner_a != sp.examiner_b,
+#             },
+#             status=status.HTTP_200_OK,
+#         )
+
+# class ReconciliationView(RetrieveAPIView):
+#     """
+#     GET endpoint to fetch StudentProcedure with both examiners' scores for reconciliation
+#     """
+#     serializer_class = ReconciliationSerializer
+    
+#     def get_queryset(self):
+#         return StudentProcedure.objects.filter(
+#             student_id=self.kwargs['student_id'],
+#             procedure_id=self.kwargs['procedure_id']
+#         )
+    
+#     def get_object(self):
+#         queryset = self.get_queryset()
+#         obj = queryset.first()
+        
+#         if not obj:
+#             # Create if doesn't exist
+#             obj = StudentProcedure.objects.create(
+#                 student_id=self.kwargs['student_id'],
+#                 procedure_id=self.kwargs['procedure_id'],
+#                 examiner_a=self.request.user,
+#                 examiner_b=self.request.user,
+#             )
+        
+#         return obj
+
+
 class ProcedureDetailView(RetrieveAPIView):
     queryset = Procedure.objects.all()
     serializer_class = ProcedureDetailSerializer
@@ -93,12 +242,31 @@ class ProcedureDetailView(RetrieveAPIView):
                 sp.examiner_b = request.user
                 sp.save()
         elif request.user not in [sp.examiner_a, sp.examiner_b]:
+            # Check if both examiners have scored
+            total_steps = sp.procedure.steps.count()
+            examiner_a_scores = sp.step_scores.filter(examiner=sp.examiner_a).count()
+            examiner_b_scores = sp.step_scores.filter(examiner=sp.examiner_b).count()
+            
+            both_scored = (examiner_a_scores == total_steps and examiner_b_scores == total_steps)
+            
             # User is not an assigned examiner
             return Response(
                 {
                     "detail": "You are not assigned as an examiner for this procedure.",
                     "examiner_a": sp.examiner_a.get_full_name(),
                     "examiner_b": sp.examiner_b.get_full_name(),
+                    "is_locked": both_scored or sp.assigned_reconciler is not None,
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Check if procedure is locked due to assigned reconciler
+        if sp.assigned_reconciler and sp.status != "reconciled":
+            return Response(
+                {
+                    "detail": "This procedure is locked. A reconciler has been assigned.",
+                    "assigned_reconciler": sp.assigned_reconciler.get_full_name(),
+                    "is_locked": True,
                 },
                 status=status.HTTP_403_FORBIDDEN
             )
@@ -109,6 +277,7 @@ class ProcedureDetailView(RetrieveAPIView):
         context = super().get_serializer_context()
         context["student_id"] = self.kwargs.get("student_id")
         return context
+
 
 class AutosaveStepScoreView(APIView):
     """
@@ -143,6 +312,19 @@ class AutosaveStepScoreView(APIView):
                 {"detail": "You are not authorized to score this procedure."},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Check if procedure is locked
+        if sp.assigned_reconciler:
+            return Response(
+                {"detail": "Cannot modify scores. Reconciler has been assigned."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if sp.status == "reconciled":
+            return Response(
+                {"detail": "Cannot modify scores. Procedure has been reconciled."},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         # Save the step score
         step_score, created = ProcedureStepScore.objects.update_or_create(
@@ -152,7 +334,7 @@ class AutosaveStepScoreView(APIView):
             defaults={"score": score},
         )
 
-        # ✅ FIXED: Update status logic - Check if BOTH DIFFERENT examiners have scored ALL steps
+        # Update status logic - Check if BOTH DIFFERENT examiners have scored ALL steps
         total_steps = sp.procedure.steps.count()
         
         # Only update status if both examiners are different users
@@ -182,9 +364,11 @@ class AutosaveStepScoreView(APIView):
                 "examiner_a_complete": examiner_a_complete,
                 "examiner_b_complete": examiner_b_complete,
                 "both_examiners_assigned": sp.examiner_a != sp.examiner_b,
+                "is_locked": sp.assigned_reconciler is not None,
             },
             status=status.HTTP_200_OK,
         )
+
 
 class ReconciliationView(RetrieveAPIView):
     """
@@ -211,8 +395,15 @@ class ReconciliationView(RetrieveAPIView):
                 examiner_b=self.request.user,
             )
         
+        # CRITICAL: Assign reconciler if not already assigned and user can reconcile
+        if obj.status == 'scored' and not obj.assigned_reconciler:
+            if obj.can_user_reconcile(self.request.user):
+                obj.assigned_reconciler = self.request.user
+                obj.save()
+        
         return obj
-    
+
+
 class SaveReconciliationView(APIView):
     """
     POST endpoint to save reconciled scores
@@ -1380,7 +1571,6 @@ class DownloadProcedureStepsTemplateView(APIView):
         wb.save(response)
         
         return response
-
 
 
 class ProgramViewSet(viewsets.ModelViewSet):
